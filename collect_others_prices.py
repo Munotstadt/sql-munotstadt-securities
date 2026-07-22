@@ -358,6 +358,15 @@ def main():
             print(f"[ERROR] {fund['name']} (fund_id={fund['fund_id']}): {e}")
             errors += 1
 
+    # --- Raiffeisen Goldvreneli 20 Fr. (Ankaufspreis) ---
+    try:
+        ankauf, value_date = fetch_raiffeisen_vreneli_ankauf()
+        upsert_price(conn, id_map[VRENELI_NAME], value_date, ankauf, "CHF", "Raiffeisen Börse")
+        print(f"[OK] {VRENELI_NAME}: {ankauf} CHF (Ankauf, Stand: {value_date})")
+    except Exception as e:
+        print(f"[ERROR] {VRENELI_NAME}: {e}")
+        errors += 1
+
     cleanup_today(conn)
     conn.close()
 
