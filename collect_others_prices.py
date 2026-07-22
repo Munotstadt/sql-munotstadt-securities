@@ -217,20 +217,35 @@ def fetch_raiffeisen_futura_nav(fund_id):
 
     text = strip_html(html)
 
-    # Sucht: CHF <Kurs> ... <Veränderung>% (<abs. Veränderung>) <DD.MM.YYYY>
-    match = re.search(
-        r"CHF\s*\n*\s*([\d]+[.,]\d+)\s*\n*\s*[+\-]?[\d.,]+%\s*\([+\-]?[\d.,]+\)\s*(\d{2}\.\d{2}\.\d{4})",
-        text,
-    )
-    if not match:
+    # Preis: direkt nach der "CHF"-Überschrift am Seitenanfang, z.B.
+    # "CHF\n\n135.30\n\n+0.84% (+1.13) 24.06.2026"
+    # Toleriert auch Tausendertrennzeichen mit Apostroph (z.B. 1'234.56).
+    price_match = re.search(r"\bCHF\s*\n+\s*([\d']+[.,]\d+)", text)
+    if not price_match:
         raise ValueError(
-            f"NAV-Kurs/Datum-Muster auf der Raiffeisen-Fondsseite (fund_id={fund_id}) "
+            f"Preis-Muster auf der Raiffeisen-Fondsseite (fund_id={fund_id}) "
             "nicht gefunden - Seitenlayout hat sich evtl. geändert."
         )
+    price_str = price_match.group(1).replace("'", "").replace(",", ".")
+    price = float(price_str)
 
-    price = float(match.group(1).replace(",", "."))
-    date_str = match.group(2)
+    # Datum: bevorzugt explizites Feld "NAV Datum", da eindeutiger benannt
+    # als das Datum im Kopfbereich (welches auch ein reines Handelsdatum sein kann).
+    date_match = re.search(r"NAV Datum\s*\n*\s*(\d{2}\.\d{2}\.\d{4})", text)
+    if not date_match:
+        # Fallback: Datum direkt nach der Diff-%-Zeile im Kopfbereich
+        date_match = re.search(r"[+\-]?[\d.,]+%\s*\([+\-]?[\d.,]+\)\s*(\d{2}\.\d{2}\.\d{4})", text)
+    if not date_match:
+        raise ValueError(
+            f"Datums-Muster auf der Raiffeisen-Fondsseite (fund_id={fund_id}) "
+            "nicht gefunden - Seitenlayout hat sich evtl. geändert."
+        )
+    date_str = date_match.group(1)
     value_date = datetime.strptime(date_str, "%d.%m.%Y").replace(hour=18, minute=0)
+
+    if price <= 0:
+        raise ValueError(f"Unplausibler Preis 0 oder negativ für fund_id={fund_id} - Extraktion vermutlich fehlgeschlagen.")
+
     return price, value_date
 
 
