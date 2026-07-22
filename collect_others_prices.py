@@ -177,6 +177,64 @@ def fetch_onvista_stoxx():
 
 
 # ---------------------------------------------------------------------------
+# Quelle 4: Raiffeisen Futura II Fonds (boerse.raiffeisen.ch, HTML-Scraping)
+# ---------------------------------------------------------------------------
+# CAUTION: kein dokumentiertes JSON-API für diese Fonds (anders als die
+# Hypothekarzinsen) - die Seite rendert NAV + Datum direkt im HTML. Falls
+# Raiffeisen das Seitenlayout ändert, muss der Regex unten evtl. angepasst werden.
+
+RAIFFEISEN_FUTURA_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+}
+
+RAIFFEISEN_FUTURA_FUNDS = [
+    {
+        "fund_id": "114426954",
+        "name": "Raiffeisen Futura II - Systematic Invest Equity (Vorsorge)",
+    },
+    {
+        "fund_id": "114426952",
+        "name": "Raiffeisen Futura II - Systematic Invest Equity B (Samantha)",
+    },
+]
+
+
+def strip_html(html: str) -> str:
+    text = re.sub(r"<script[^>]*>.*?</script>", " ", html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "\n", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text
+
+
+def fetch_raiffeisen_futura_nav(fund_id):
+    """Liefert (price, value_date) für einen Raiffeisen-Futura-Fonds."""
+    url = f"https://boerse.raiffeisen.ch/fonds/detail/{fund_id}?exchangeid=393"
+    req = urllib.request.Request(url, headers=RAIFFEISEN_FUTURA_HEADERS)
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        html = resp.read().decode("utf-8", errors="replace")
+
+    text = strip_html(html)
+
+    # Sucht: CHF <Kurs> ... <Veränderung>% (<abs. Veränderung>) <DD.MM.YYYY>
+    match = re.search(
+        r"CHF\s*\n*\s*([\d]+[.,]\d+)\s*\n*\s*[+\-]?[\d.,]+%\s*\([+\-]?[\d.,]+\)\s*(\d{2}\.\d{2}\.\d{4})",
+        text,
+    )
+    if not match:
+        raise ValueError(
+            f"NAV-Kurs/Datum-Muster auf der Raiffeisen-Fondsseite (fund_id={fund_id}) "
+            "nicht gefunden - Seitenlayout hat sich evtl. geändert."
+        )
+
+    price = float(match.group(1).replace(",", "."))
+    date_str = match.group(2)
+    value_date = datetime.strptime(date_str, "%d.%m.%Y").replace(hour=18, minute=0)
+    return price, value_date
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -188,6 +246,8 @@ def main():
         "Raiffeisen Winterthur Hypothek 5 Jahr Zinssatz",
         "Raiffeisen Winterthur Hypothek 10 Jahr Zinssatz",
         "Raiffeisen Winterthur Hypothek 15 Jahr Zinssatz",
+        "Raiffeisen Futura II - Systematic Invest Equity (Vorsorge)",
+        "Raiffeisen Futura II - Systematic Invest Equity B (Samantha)",
     ]
 
     conn = get_connection()
@@ -225,6 +285,17 @@ def main():
     except Exception as e:
         print(f"[ERROR] onvista STOXX Europe 600 EUR NR: {e}")
         errors += 1
+
+    # --- Raiffeisen Futura II Fonds (Vorsorge + Samantha) ---
+    for fund in RAIFFEISEN_FUTURA_FUNDS:
+        try:
+            price, value_date = fetch_raiffeisen_futura_nav(fund["fund_id"])
+            name = fund["name"]
+            upsert_price(conn, id_map[name], value_date, price, "CHF", "Raiffeisen Börse")
+            print(f"[OK] {name}: {price} CHF (NAV-Datum: {value_date})")
+        except Exception as e:
+            print(f"[ERROR] {fund['name']} (fund_id={fund['fund_id']}): {e}")
+            errors += 1
 
     cleanup_today(conn)
     conn.close()
