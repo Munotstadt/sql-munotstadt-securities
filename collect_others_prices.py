@@ -250,6 +250,51 @@ def fetch_raiffeisen_futura_nav(fund_id):
 
 
 # ---------------------------------------------------------------------------
+# Quelle 5: Raiffeisen Börse - Goldvreneli 20 Fr. (Ankaufspreis)
+# ---------------------------------------------------------------------------
+# CAUTION: Münzen-Übersichtsseite ohne eigene IDs/API - reines HTML-Scraping.
+# Falls Raiffeisen das Layout dieser Tabelle ändert, muss der Regex angepasst werden.
+
+RAIFFEISEN_EDELMETALLE_URL = "https://boerse.raiffeisen.ch/edelmetalle"
+VRENELI_NAME = "Gold Vreneli (CHF 20)"
+
+
+def fetch_raiffeisen_vreneli_ankauf():
+    """Liefert (Ankaufspreis, ValueDate) für das 20 Fr. Vreneli."""
+    req = urllib.request.Request(RAIFFEISEN_EDELMETALLE_URL, headers=RAIFFEISEN_FUTURA_HEADERS)
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        html = resp.read().decode("utf-8", errors="replace")
+
+    text = strip_html(html)
+
+    # Nach "20 Fr. Vreneli" folgen (nicht-gierig, über Zeilenumbrüche hinweg)
+    # zwei Preise: Ankauf, dann Verkauf.
+    match = re.search(
+        r"20 Fr\.\s*Vreneli.*?([\d']+[.,]\d+)\s*\n+\s*([\d']+[.,]\d+)",
+        text, re.DOTALL,
+    )
+    if not match:
+        raise ValueError(
+            "Preis-Muster für '20 Fr. Vreneli' auf boerse.raiffeisen.ch/edelmetalle "
+            "nicht gefunden - Seitenlayout hat sich evtl. geändert."
+        )
+    ankauf = float(match.group(1).replace("'", "").replace(",", "."))
+
+    # Zeitstempel der Münzen-Tabelle: letztes "Verwendeter Kurs von:" auf der Seite
+    date_matches = re.findall(
+        r"Verwendeter Kurs von:\s*(\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}:\d{2})", text
+    )
+    if not date_matches:
+        raise ValueError("Zeitstempel 'Verwendeter Kurs von' nicht gefunden.")
+    value_date = datetime.strptime(date_matches[-1], "%d.%m.%Y %H:%M:%S")
+
+    if ankauf <= 0:
+        raise ValueError("Unplausibler Ankaufspreis 0 oder negativ - Extraktion vermutlich fehlgeschlagen.")
+
+    return ankauf, value_date
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -263,6 +308,7 @@ def main():
         "Raiffeisen Winterthur Hypothek 15 Jahr Zinssatz",
         "Raiffeisen Futura II - Systematic Invest Equity (Vorsorge)",
         "Raiffeisen Futura II - Systematic Invest Equity B (Samantha)",
+        VRENELI_NAME,
     ]
 
     conn = get_connection()
