@@ -75,12 +75,18 @@ def main():
 
     # Kennzahlen
     values = query_to_list(cursor, """
-        SELECT v.SecurityID, v.ValueDate, v.ParameterID, p.ParameterName, v.MetricValue, v.Currency
+        SELECT v.SecurityID, v.ValueDate, v.ParameterID, v.MetricValue, v.Currency
         FROM security_values v
-        LEFT JOIN security_parameters p ON v.ParameterID = p.ParameterID
         ORDER BY v.ValueDate DESC
     """)
     write_json("values.json", values)
+
+    # Parameter-Log (u.a. ParameterID 59 = Export-Flag, 60 = Produkt, 61 = Subgruppe)
+    parameter_log = query_to_list(cursor, """
+        SELECT SecurityID, ParameterID, ParameterValue
+        FROM security_parameter_log
+    """)
+    write_json("parameter_log.json", parameter_log)
 
     conn.close()
     print("Export abgeschlossen.")
