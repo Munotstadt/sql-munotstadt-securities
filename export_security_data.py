@@ -11,7 +11,7 @@ def json_default(obj):
 def get_connection():
     server = os.environ["SQL_SERVER"]        # z.B. deinserver.database.windows.net
     database = os.environ["SQL_DATABASE"]
-    username = os.environ["SQL_USERNAME"]
+    username = os.environ["SQL_USER"]
     password = os.environ["SQL_PASSWORD"]
     conn_str = (
         f"Driver={{ODBC Driver 18 for SQL Server}};"
