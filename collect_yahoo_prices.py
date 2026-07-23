@@ -1,7 +1,15 @@
 """
-Holt für alle Securities mit gesetztem YahooTicker-Parameter den aktuellen
+Holt für alle Securities mit gesetztem Yahoo-Ticker den aktuellen
 Kurs von Yahoo Finance und schreibt ihn in security_prices (MERGE = Upsert,
 damit mehrfache Läufe innerhalb der gleichen Minute keinen PK-Konflikt geben).
+
+Datenquelle für die Ticker-Zuordnung: security_parameter_log
+  - ParameterID 20 = DataSource        (Wert 'Yahoo Finance' markiert aktive Quelle)
+  - ParameterID 21 = DataSourceTicker  (Wert = eigentlicher Yahoo-Ticker, z.B. '^TNX')
+Eine Security gilt als "aktiv fuer Yahoo", wenn ihre ParameterID=20-Zeile
+ParameterValue = 'Yahoo Finance' hat und ValidTo entweder NULL ist oder in
+der Zukunft liegt. Der Ticker kommt aus der zugehoerigen ParameterID=21-Zeile
+mit der gleichen Bedingung.
 """
 
 import os
@@ -26,15 +34,32 @@ def get_connection():
 
 
 def fetch_tickers(conn):
-    """Alle SecurityID + Yahoo-Ticker, die aktuell gültig sind (ValidTo NULL oder in Zukunft)."""
+    """
+    Alle SecurityID + Yahoo-Ticker, die aktuell gueltig sind.
+    Quelle: security_parameter_log (ParameterID 20 = DataSource, 21 = DataSourceTicker).
+    Kein Bezug mehr auf die alte Tabelle security_parameters.
+    """
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT p.SecurityID, p.ParameterValue AS Ticker, m.Name
-        FROM security_parameters p
-        JOIN security_master m ON p.SecurityID = m.SecurityID
-        WHERE p.ParameterName = 'YahooTicker'
-          AND (p.ValidTo IS NULL OR p.ValidTo >= CAST(GETDATE() AS DATE))
+        ;WITH ActiveDataSource AS (
+            SELECT SecurityID
+            FROM security_parameter_log
+            WHERE ParameterID = 20
+              AND ParameterValue = 'Yahoo Finance'
+              AND (ValidTo IS NULL OR ValidTo >= CAST(GETDATE() AS DATE))
+        ),
+        ActiveTicker AS (
+            SELECT SecurityID, ParameterValue AS Ticker,
+                   ROW_NUMBER() OVER (PARTITION BY SecurityID ORDER BY ValidFrom DESC) AS rn
+            FROM security_parameter_log
+            WHERE ParameterID = 21
+              AND (ValidTo IS NULL OR ValidTo >= CAST(GETDATE() AS DATE))
+        )
+        SELECT ds.SecurityID, t.Ticker, m.Name
+        FROM ActiveDataSource ds
+        JOIN ActiveTicker t ON t.SecurityID = ds.SecurityID AND t.rn = 1
+        JOIN security_master m ON m.SecurityID = ds.SecurityID
         """
     )
     return [(r.SecurityID, r.Ticker, r.Name) for r in cursor.fetchall()]
@@ -116,7 +141,7 @@ def cleanup_today(conn):
 def main():
     conn = get_connection()
     tickers = fetch_tickers(conn)
-    print(f"{len(tickers)} Securities mit YahooTicker gefunden.")
+    print(f"{len(tickers)} Securities mit aktivem Yahoo-Ticker gefunden.")
 
     # Auf Minute gerundet, damit MERGE bei mehrfachen Läufen sauber upsert statt dupliziert
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
