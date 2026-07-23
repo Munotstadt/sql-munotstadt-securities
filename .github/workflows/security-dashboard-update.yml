@@ -1,0 +1,57 @@
+name: Security Dashboard Update
+
+on:
+  schedule:
+    - cron: '20 * * * *'
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout collector repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ODBC Driver
+        run: |
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          ACCEPT_EULA=Y sudo apt-get install -y msodbcsql18 unixodbc-dev
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run export script
+        env:
+          SQL_SERVER: ${{ secrets.SQL_SERVER }}
+          SQL_DATABASE: ${{ secrets.SQL_DATABASE }}
+          SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
+          SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
+        run: python export_security_data.py
+
+      - name: Checkout dashboard repo
+        uses: actions/checkout@v4
+        with:
+          repository: Munotstadt/Securities_dashboard
+          token: ${{ secrets.DASHBOARD_PUSH_TOKEN }}
+          path: dashboard-repo
+
+      - name: Copy data into dashboard repo
+        run: |
+          mkdir -p dashboard-repo/data
+          cp data/*.json dashboard-repo/data/
+
+      - name: Commit and push to dashboard repo
+        working-directory: dashboard-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/*.json
+          git diff --quiet --cached || git commit -m "Update security data $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
