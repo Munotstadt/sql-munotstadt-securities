@@ -31,7 +31,7 @@ jobs:
         env:
           SQL_SERVER: ${{ secrets.SQL_SERVER }}
           SQL_DATABASE: ${{ secrets.SQL_DATABASE }}
-          SQL_USERNAME: ${{ secrets.SQL_USER }}
+          SQL_USER: ${{ secrets.SQL_USER }}
           SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
         run: python export_security_data.py
 
